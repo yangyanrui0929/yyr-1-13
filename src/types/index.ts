@@ -2,6 +2,18 @@ export type Phase = 'day' | 'night'
 
 export type Weather = '晴' | '云' | '雨' | '雪'
 
+export type TeaLevel = '滚烫' | '热' | '温' | '凉' | '冷'
+
+export interface SeatTeaState {
+  seatId: number
+  temperature: number
+  lastRefillTick: number
+  refillCount: number
+  emotionalMatch: boolean
+  promptedUrge: boolean
+  promptedLeave: boolean
+}
+
 export type SnackCategory = '茶' | '小吃' | '点心'
 
 export interface Snack {
@@ -148,6 +160,8 @@ export interface GameState {
   storyScores: Record<string, number[]>
   isSettlement: boolean
   lastSettlement: SettlementResult | null
+  seatTeaStates: SeatTeaState[]
+  performanceTick: number
 }
 
 export interface SettlementResult {
@@ -161,6 +175,9 @@ export interface SettlementResult {
   badReviewPenalty: number
   tips: number
   snackRevenue: number
+  teaCareBonus: number
+  teaNeglectPenalty: number
+  leftCustomerLoss: number
   totalEarnings: number
   reputationDelta: number
   avgSatisfaction: number

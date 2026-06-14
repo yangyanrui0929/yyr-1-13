@@ -14,6 +14,7 @@ import type {
   StoryRecord,
   ReputationHistory,
   Renovation,
+  SeatTeaState,
 } from '@/types'
 import { STORIES } from '@/data/stories'
 import { initSnacks } from '@/data/snacks'
@@ -27,6 +28,48 @@ const WEATHERS: Weather[] = ['晴', '晴', '晴', '云', '云', '雨', '雪']
 
 function randomWeather(): Weather {
   return WEATHERS[Math.floor(Math.random() * WEATHERS.length)]
+}
+
+export function getTeaLevel(temperature: number): '滚烫' | '热' | '温' | '凉' | '冷' {
+  if (temperature >= 85) return '滚烫'
+  if (temperature >= 60) return '热'
+  if (temperature >= 35) return '温'
+  if (temperature >= 15) return '凉'
+  return '冷'
+}
+
+function getTeaEmoji(temperature: number): string {
+  const level = getTeaLevel(temperature)
+  switch (level) {
+    case '滚烫': return '♨️'
+    case '热': return '🍵'
+    case '温': return '🫖'
+    case '凉': return '🥤'
+    case '冷': return '🧊'
+  }
+}
+
+function isStoryTurningPoint(progress: number): boolean {
+  return (progress >= 22 && progress <= 28) || (progress >= 47 && progress <= 53) || (progress >= 72 && progress <= 78)
+}
+
+function calcEmotionalMatch(temperature: number, progress: number): boolean {
+  const level = getTeaLevel(temperature)
+  const atTurning = isStoryTurningPoint(progress)
+  if (atTurning && (level === '热' || level === '温')) return true
+  return false
+}
+
+function initSeatTeaStates(seats: Seat[]): SeatTeaState[] {
+  return seats.filter(s => s.occupied).map(s => ({
+    seatId: s.id,
+    temperature: 90,
+    lastRefillTick: 0,
+    refillCount: 0,
+    emotionalMatch: false,
+    promptedUrge: false,
+    promptedLeave: false,
+  }))
 }
 
 function pickRandomStories(count: number): Story[] {
@@ -67,6 +110,8 @@ const initialState: GameState = {
   storyScores: {},
   isSettlement: false,
   lastSettlement: null,
+  seatTeaStates: [],
+  performanceTick: 0,
 }
 
 interface GameActions {
@@ -82,6 +127,7 @@ interface GameActions {
   nextDay: () => void
   resetGame: () => void
   addLedgerRecord: (type: LedgerRecord['type'], category: string, amount: number, note: string) => void
+  refillTea: (seatId: number) => void
 }
 
 export const useGameStore = create<GameState & GameActions>()(
@@ -180,6 +226,8 @@ export const useGameStore = create<GameState & GameActions>()(
           storyProgress: 0,
           performanceActive: false,
           currentInterruption: null,
+          seatTeaStates: initSeatTeaStates(seats),
+          performanceTick: 0,
         })
       },
 
@@ -194,7 +242,16 @@ export const useGameStore = create<GameState & GameActions>()(
       startPerformance: () => {
         const state = get()
         if (!state.currentStory || !state.currentBranch) return
-        set({ performanceActive: true, storyProgress: 0 })
+        const refreshedTeaStates = state.seatTeaStates.map(ts => ({
+          ...ts,
+          temperature: 90,
+          lastRefillTick: 0,
+          refillCount: 0,
+          emotionalMatch: false,
+          promptedUrge: false,
+          promptedLeave: false,
+        }))
+        set({ performanceActive: true, storyProgress: 0, performanceTick: 0, seatTeaStates: refreshedTeaStates })
       },
 
       tickPerformance: () => {
@@ -202,35 +259,177 @@ export const useGameStore = create<GameState & GameActions>()(
         if (!state.performanceActive) return
 
         const newProgress = Math.min(100, state.storyProgress + 4)
+        const newTick = state.performanceTick + 1
 
-        if (!state.currentInterruption && Math.random() < 0.18 && state.storyProgress > 10 && state.storyProgress < 90) {
-          const seatedCustomers = state.customers.filter((c) => c.seatId !== null)
-          if (seatedCustomers.length > 0) {
-            const c = seatedCustomers[Math.floor(Math.random() * seatedCustomers.length)]
-            const matching = state.interruptions.filter((i) => i.customerType === c.type)
-            const pool = matching.length > 0 ? matching : state.interruptions
-            const ev = pool[Math.floor(Math.random() * pool.length)]
-            set({ currentInterruption: ev, storyProgress: newProgress })
-            return
+        const seatedCustomers = state.customers.filter((c) => c.seatId !== null)
+
+        let updatedTeaStates = state.seatTeaStates.map((ts) => {
+          const seat = state.seats.find((s) => s.id === ts.seatId)
+          let coolRate = 4
+          if (seat?.tier === '雅座') coolRate = 3.5
+          if (seat?.tier === '贵宾') coolRate = 3
+          const newTemp = Math.max(0, ts.temperature - coolRate)
+          const emotionalMatch = calcEmotionalMatch(newTemp, newProgress) || ts.emotionalMatch
+          return {
+            ...ts,
+            temperature: newTemp,
+            emotionalMatch,
+          }
+        })
+
+        let triggeredInterruption: InterruptionEvent | null = null
+        let customersToRemove: string[] = []
+
+        for (const ts of updatedTeaStates) {
+          const customer = state.customers.find((c) => c.seatId === ts.seatId)
+          if (!customer) continue
+          const teaLevel = getTeaLevel(ts.temperature)
+
+          if (teaLevel === '凉' || teaLevel === '冷') {
+            if (customer.type === '商贾' && !ts.promptedUrge && !state.currentInterruption) {
+              if (Math.random() < 0.45) {
+                updatedTeaStates = updatedTeaStates.map((x) =>
+                  x.seatId === ts.seatId ? { ...x, promptedUrge: true } : x
+                )
+                const urgeEvents = state.interruptions.filter(
+                  (i) => i.id === 'i-tea-urge-merchant' || (i.customerType === '商贾' && i.id === 'i3')
+                )
+                const pool = urgeEvents.length > 0 ? urgeEvents : state.interruptions
+                triggeredInterruption = pool[Math.floor(Math.random() * pool.length)]
+                break
+              }
+            }
+          }
+
+          if (teaLevel === '冷') {
+            const seat = state.seats.find((s) => s.id === ts.seatId)
+            if (seat?.tier === '雅座' && !ts.promptedLeave) {
+              if (Math.random() < 0.25) {
+                updatedTeaStates = updatedTeaStates.map((x) =>
+                  x.seatId === ts.seatId ? { ...x, promptedLeave: true } : x
+                )
+                customersToRemove.push(customer.id)
+              }
+            }
+            if (seat?.tier === '贵宾' && !ts.promptedLeave) {
+              if (Math.random() < 0.12) {
+                updatedTeaStates = updatedTeaStates.map((x) =>
+                  x.seatId === ts.seatId ? { ...x, promptedLeave: true } : x
+                )
+                customersToRemove.push(customer.id)
+              }
+            }
           }
         }
 
-        const customers = state.customers.map((c) => {
+        if (!state.currentInterruption && !triggeredInterruption && Math.random() < 0.12 && state.storyProgress > 10 && state.storyProgress < 90) {
+          if (seatedCustomers.length > 0) {
+            const remainingSeated = seatedCustomers.filter((c) => !customersToRemove.includes(c.id))
+            if (remainingSeated.length > 0) {
+              const c = remainingSeated[Math.floor(Math.random() * remainingSeated.length)]
+              const matching = state.interruptions.filter((i) => i.customerType === c.type)
+              const pool = matching.length > 0 ? matching : state.interruptions
+              triggeredInterruption = pool[Math.floor(Math.random() * pool.length)]
+            }
+          }
+        }
+
+        let customers = state.customers.map((c) => {
           if (c.seatId === null) return c
+          const ts = updatedTeaStates.find((t) => t.seatId === c.seatId)
           let delta = Math.random() < 0.7 ? 1 : -1
           if (state.currentStory && state.currentBranch) {
             const match = state.currentBranch.tags.some((t) => c.preferenceTags.includes(t))
             if (match) delta += 1
           }
+          if (ts) {
+            const teaLevel = getTeaLevel(ts.temperature)
+            if (teaLevel === '热' || teaLevel === '温') delta += 1
+            if (teaLevel === '凉') delta -= 1
+            if (teaLevel === '冷') delta -= 2
+            if (ts.emotionalMatch) delta += 2
+          }
+          if (customersToRemove.includes(c.id)) {
+            return { ...c, seatId: null, satisfaction: Math.max(0, c.satisfaction - 25) }
+          }
           return { ...c, satisfaction: Math.max(0, Math.min(100, c.satisfaction + delta)) }
         })
 
+        let updatedSeats = state.seats
+        if (customersToRemove.length > 0) {
+          updatedSeats = state.seats.map((s) => {
+            const c = state.customers.find((cust) => cust.seatId === s.id)
+            if (c && customersToRemove.includes(c.id)) {
+              return { ...s, occupied: false }
+            }
+            return s
+          })
+        }
+
+        const finalInterruption = state.currentInterruption || triggeredInterruption
+
         if (newProgress >= 100) {
-          set({ performanceActive: false, storyProgress: 100, customers })
+          set({
+            performanceActive: false,
+            storyProgress: 100,
+            customers,
+            seatTeaStates: updatedTeaStates,
+            performanceTick: newTick,
+            seats: updatedSeats,
+          })
           setTimeout(() => get().doSettlement(), 600)
         } else {
-          set({ storyProgress: newProgress, customers })
+          set({
+            storyProgress: newProgress,
+            customers,
+            seatTeaStates: updatedTeaStates,
+            performanceTick: newTick,
+            seats: updatedSeats,
+            currentInterruption: finalInterruption,
+          })
         }
+      },
+
+      refillTea: (seatId: number) => {
+        const state = get()
+        if (!state.performanceActive) return
+        const teaState = state.seatTeaStates.find((ts) => ts.seatId === seatId)
+        if (!teaState) return
+        const refillCost = 3
+
+        if (state.gold < refillCost) return
+
+        const emotionalMatch = calcEmotionalMatch(90, state.storyProgress) || teaState.emotionalMatch
+
+        const updatedTeaStates = state.seatTeaStates.map((ts) =>
+          ts.seatId === seatId
+            ? {
+                ...ts,
+                temperature: 90,
+                lastRefillTick: state.performanceTick,
+                refillCount: ts.refillCount + 1,
+                emotionalMatch,
+                promptedUrge: false,
+              }
+            : ts
+        )
+
+        let bonusSatisfaction = 5
+        if (emotionalMatch) bonusSatisfaction += 12
+
+        const customers = state.customers.map((c) =>
+          c.seatId === seatId
+            ? { ...c, satisfaction: Math.max(0, Math.min(100, c.satisfaction + bonusSatisfaction)) }
+            : c
+        )
+
+        set({
+          gold: state.gold - refillCost,
+          seatTeaStates: updatedTeaStates,
+          customers,
+        })
+
+        get().addLedgerRecord('支出', '续茶服务', refillCost, `为第${seatId}号桌续茶${emotionalMatch ? '（情绪契合）' : ''}`)
       },
 
       handleInterruption: (option: InterruptionOption) => {
@@ -290,7 +489,8 @@ export const useGameStore = create<GameState & GameActions>()(
           state.lastStoryDay,
           state.storyScores,
           state.reputation,
-          state.snacks
+          state.snacks,
+          state.seatTeaStates
         )
 
         const storyRecord: StoryRecord = {
@@ -344,8 +544,14 @@ export const useGameStore = create<GameState & GameActions>()(
           get().addLedgerRecord('收入', '客人打赏', result.tips, '客人满意打赏')
         if (result.snackRevenue > 0)
           get().addLedgerRecord('收入', '茶点售卖', result.snackRevenue, '消费茶点')
+        if (result.teaCareBonus > 0)
+          get().addLedgerRecord('收入', '茶温好评', result.teaCareBonus, '温度贴心，客人满意')
         if (result.badReviewPenalty > 0)
           get().addLedgerRecord('支出', '差评损失', result.badReviewPenalty, '客人不满索赔')
+        if (result.teaNeglectPenalty > 0)
+          get().addLedgerRecord('支出', '茶温怠慢', result.teaNeglectPenalty, '茶水凉透伤客')
+        if (result.leftCustomerLoss > 0)
+          get().addLedgerRecord('支出', '客人离席损失', result.leftCustomerLoss, '贵宾/雅座客愤然离席')
       },
 
       nextDay: () => {
@@ -362,6 +568,8 @@ export const useGameStore = create<GameState & GameActions>()(
           currentInterruption: null,
           isSettlement: false,
           seats: s.seats.map((seat) => ({ ...seat, occupied: false })),
+          seatTeaStates: [],
+          performanceTick: 0,
         }))
       },
 

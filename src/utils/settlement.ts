@@ -7,6 +7,7 @@ import type {
   StoryRecord,
   SettlementResult,
   Snack,
+  SeatTeaState,
 } from '@/types'
 import { calcAvgTasteMatch } from './tasteMatch'
 import { calcAvgSeatView } from './seatView'
@@ -14,6 +15,14 @@ import { calcStoryHeat } from './storyHeat'
 import { calcSerialExpect } from './serialExpect'
 import { calcBadReview, calcBadReviewGold } from './badReview'
 import { SEAT_PRICE_MULTIPLIER } from '@/data/seats'
+
+function getTeaLevel(temperature: number): '滚烫' | '热' | '温' | '凉' | '冷' {
+  if (temperature >= 85) return '滚烫'
+  if (temperature >= 60) return '热'
+  if (temperature >= 35) return '温'
+  if (temperature >= 15) return '凉'
+  return '冷'
+}
 
 export function calcSettlement(
   day: number,
@@ -26,7 +35,8 @@ export function calcSettlement(
   lastStoryDay: Record<string, number>,
   storyScores: Record<string, number[]>,
   reputation: number,
-  snacks: Snack[]
+  snacks: Snack[],
+  seatTeaStates: SeatTeaState[] = []
 ): SettlementResult {
   const audience = customers.filter((c) => c.seatId !== null)
   const audienceCount = audience.length
@@ -75,6 +85,43 @@ export function calcSettlement(
     if (s) s.stock = Math.max(0, s.stock - n)
   }
 
+  let teaCareBonus = 0
+  let teaNeglectPenalty = 0
+  let leftCustomerLoss = 0
+
+  for (const ts of seatTeaStates) {
+    const customer = customers.find((c) => c.seatId === ts.seatId)
+    const seat = seats.find((s) => s.id === ts.seatId)
+    const seatMul = seat ? SEAT_PRICE_MULTIPLIER[seat.tier] : 1
+
+    if (customer && customer.seatId !== null) {
+      const avgTemp = ts.refillCount > 0 ? (90 * (ts.refillCount + 1) - ts.temperature) / (ts.refillCount + 1) : ts.temperature
+      const finalLevel = getTeaLevel(ts.temperature)
+      const seatBonusBase = Math.round(5 * seatMul)
+
+      if (finalLevel === '热' || finalLevel === '温' || ts.emotionalMatch) {
+        const tempScore = ts.emotionalMatch ? 1.5 : (finalLevel === '热' ? 1.2 : 1.0)
+        teaCareBonus += Math.round(seatBonusBase * tempScore * 0.4)
+      }
+
+      if (finalLevel === '凉') {
+        teaNeglectPenalty += Math.round(seatBonusBase * 0.3)
+      }
+      if (finalLevel === '冷') {
+        teaNeglectPenalty += Math.round(seatBonusBase * 0.6)
+      }
+
+      if (ts.refillCount >= 2 && avgTemp >= 50) {
+        teaCareBonus += Math.round(seatBonusBase * 0.3)
+      }
+    }
+
+    if (ts.promptedLeave) {
+      const seatMul = seat ? SEAT_PRICE_MULTIPLIER[seat.tier] : 1
+      leftCustomerLoss += Math.round(8 * seatMul)
+    }
+  }
+
   const totalEarnings =
     baseEarnings +
     tasteMatchBonus +
@@ -82,8 +129,11 @@ export function calcSettlement(
     storyHeatBonus +
     serialExpectBonus +
     tips +
-    snackRevenue -
-    badReviewPenalty
+    snackRevenue +
+    teaCareBonus -
+    badReviewPenalty -
+    teaNeglectPenalty -
+    leftCustomerLoss
 
   const avgSatisfaction =
     audience.length > 0
@@ -93,7 +143,10 @@ export function calcSettlement(
   const satisfactionDelta = Math.round((avgSatisfaction - 50) * 0.15)
   const heatDelta = Math.round((heat.value - 50) * 0.1)
   const badReviewDelta = -badReview.value
-  const reputationDelta = satisfactionDelta + heatDelta + badReviewDelta
+  const teaDelta = teaCareBonus > 0 ? Math.min(5, Math.round(teaCareBonus / 30)) : 0
+  const neglectDelta = -(teaNeglectPenalty > 0 ? Math.min(5, Math.round(teaNeglectPenalty / 20)) : 0)
+  const leaveDelta = -(leftCustomerLoss > 0 ? Math.min(8, Math.round(leftCustomerLoss / 15)) : 0)
+  const reputationDelta = satisfactionDelta + heatDelta + badReviewDelta + teaDelta + neglectDelta + leaveDelta
 
   return {
     day,
@@ -106,6 +159,9 @@ export function calcSettlement(
     badReviewPenalty,
     tips,
     snackRevenue,
+    teaCareBonus,
+    teaNeglectPenalty,
+    leftCustomerLoss,
     totalEarnings,
     reputationDelta,
     avgSatisfaction,

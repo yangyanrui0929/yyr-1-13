@@ -93,7 +93,10 @@ export default function Settlement() {
           <Row label="连载期待加成" value={r.serialExpectBonus} positive />
           <Row label="打赏收入" value={r.tips} positive />
           <Row label="茶点售卖利润" value={r.snackRevenue} positive />
+          <Row label="茶温贴心奖励" value={r.teaCareBonus} positive />
           {r.badReviewPenalty > 0 && <Row label="差评索赔" value={r.badReviewPenalty} />}
+          {r.teaNeglectPenalty > 0 && <Row label="茶温怠慢惩罚" value={r.teaNeglectPenalty} />}
+          {r.leftCustomerLoss > 0 && <Row label="贵宾/雅座客离席损失" value={r.leftCustomerLoss} />}
         </div>
 
         <Row label="今夜合计收入" value={r.totalEarnings} positive showIcon highlight />

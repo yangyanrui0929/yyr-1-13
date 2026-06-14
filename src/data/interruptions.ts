@@ -151,4 +151,54 @@ export const INTERRUPTIONS: InterruptionEvent[] = [
       },
     ],
   },
+  {
+    id: 'i-tea-urge-merchant',
+    customerType: '商贾',
+    content: '那商人脸色渐沉，用茶盖刮了刮早已凉透的茶碗，语气不耐：「掌柜的！某花了钱不是来喝凉茶的！这故事好是好，可这茶凉得心也凉了！」',
+    options: [
+      {
+        text: '立刻小跑上前，亲奉滚热新茶：「是小的怠慢！这杯极品龙井算我请客，客官消消气」',
+        satisfactionEffect: 25,
+        reputationEffect: 2,
+        goldEffect: -10,
+      },
+      {
+        text: '高声招呼伙计：「快给这位爷续上热茶！再加一碟上好的松子糖」',
+        satisfactionEffect: 12,
+        reputationEffect: 1,
+        goldEffect: -5,
+      },
+      {
+        text: '陪笑道：「客官稍候，这人手实在不够...」',
+        satisfactionEffect: -20,
+        reputationEffect: -2,
+        goldEffect: 0,
+      },
+    ],
+  },
+  {
+    id: 'i-tea-leave-premium',
+    customerType: '官员',
+    content: '雅座那位大人缓缓起身，拂袖将凉茶杯扫在地上，瓷片四溅：「哼！如此待客之道？茶凉如此，某不在此受辱！」（其余客人皆侧目观望）',
+    options: [
+      {
+        text: '扑通跪倒，连连叩头：「大人恕罪！小的该死！求大人给小的一个补救的机会！」',
+        satisfactionEffect: 10,
+        reputationEffect: 1,
+        goldEffect: -20,
+      },
+      {
+        text: '长揖到底，命伙计速奉极品好茶加精致细点：「大人息怒，且容小的将功折罪」',
+        satisfactionEffect: 18,
+        reputationEffect: 2,
+        goldEffect: -15,
+      },
+      {
+        text: '沉着脸命伙计拦住：「大人，这茶钱...还请结清再走」',
+        satisfactionEffect: -35,
+        reputationEffect: -8,
+        goldEffect: 5,
+      },
+    ],
+  },
 ]

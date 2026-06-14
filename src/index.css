@@ -83,4 +83,86 @@ body {
   .stat-value {
     @apply text-2xl font-brush text-ink;
   }
+
+  .btn-cinnabar {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-cinnabar text-paper font-song font-semibold;
+    @apply shadow-wood transition-all duration-200 border-2 border-cinnabar;
+    @apply hover:shadow-wood-hover hover:-translate-y-0.5 hover:bg-cinnabar-dark;
+    @apply active:translate-y-0 active:shadow-none;
+  }
+}
+
+@layer utilities {
+  .animate-unroll {
+    animation: unroll 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .animate-floatUp {
+    animation: floatUp 1.2s ease-out forwards;
+  }
+
+  .animate-fadeIn {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  .animate-breathe {
+    animation: breathe 3s ease-in-out infinite;
+  }
+
+  .animate-shake {
+    animation: shake 0.5s ease-in-out infinite;
+  }
+
+  .animate-coinFall {
+    animation: coinFall 2s ease-in forwards;
+  }
+}
+
+@keyframes floatUp {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -40px);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes unroll {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(0, 20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0, 0);
+  }
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+@keyframes coinFall {
+  0% {
+    opacity: 1;
+    transform: translateY(-20px) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(100vh) rotate(720deg);
+  }
 }

@@ -12,6 +12,17 @@ export interface SeatTeaState {
   emotionalMatch: boolean
   promptedUrge: boolean
   promptedLeave: boolean
+  lastPatienceGain: number
+  lastRefillEmotional: boolean
+}
+
+export interface CustomerLeaveAlert {
+  id: string
+  customerName: string
+  customerType: string
+  seatTier: string
+  reason: string
+  timestamp: number
 }
 
 export type SnackCategory = '茶' | '小吃' | '点心'
@@ -162,6 +173,7 @@ export interface GameState {
   lastSettlement: SettlementResult | null
   seatTeaStates: SeatTeaState[]
   performanceTick: number
+  customerLeaveAlerts: CustomerLeaveAlert[]
 }
 
 export interface SettlementResult {

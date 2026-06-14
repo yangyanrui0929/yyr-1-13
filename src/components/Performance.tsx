@@ -1,8 +1,8 @@
-import { useEffect, useMemo } from 'react'
-import { Users, Coffee, AlertTriangle, Sparkles } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Users, Coffee, AlertTriangle, Sparkles, X, Heart, Clock } from 'lucide-react'
 import { useGameStore, getTeaLevel } from '@/store/useGameStore'
 import Interruption from './Interruption'
-import type { SeatTeaState, Customer, Seat } from '@/types'
+import type { SeatTeaState, Customer, Seat, CustomerLeaveAlert } from '@/types'
 
 function getMood(sat: number): string {
   if (sat >= 80) return '😍'
@@ -38,6 +38,13 @@ function isNearTurningPoint(progress: number): { near: boolean; range: string } 
   return { near: false, range: '' }
 }
 
+interface PatienceFloat {
+  id: string
+  seatId: number
+  value: number
+  emotional: boolean
+}
+
 interface CustomerCardProps {
   customer: Customer
   seat: Seat | undefined
@@ -45,9 +52,11 @@ interface CustomerCardProps {
   onRefill: (seatId: number) => void
   canAfford: boolean
   performanceActive: boolean
+  onFloatComplete: (floatId: string) => void
+  floats: PatienceFloat[]
 }
 
-function CustomerCard({ customer, seat, teaState, onRefill, canAfford, performanceActive }: CustomerCardProps) {
+function CustomerCard({ customer, seat, teaState, onRefill, canAfford, performanceActive, onFloatComplete, floats }: CustomerCardProps) {
   const temperature = teaState?.temperature ?? 0
   const teaLevel = getTeaLevel(temperature)
   const teaEmoji = getTeaEmoji(temperature)
@@ -55,6 +64,11 @@ function CustomerCard({ customer, seat, teaState, onRefill, canAfford, performan
   const urgent = temperature < 35
   const emotional = teaState?.emotionalMatch
   const refillCount = teaState?.refillCount ?? 0
+  const lastPatienceGain = teaState?.lastPatienceGain ?? 0
+  const lastRefillEmotional = teaState?.lastRefillEmotional ?? false
+  const patience = customer.patience
+
+  const cardFloats = floats.filter((f) => f.seatId === customer.seatId)
 
   return (
     <div
@@ -67,13 +81,27 @@ function CustomerCard({ customer, seat, teaState, onRefill, canAfford, performan
           ✨
         </div>
       )}
+
+      {cardFloats.map((float) => (
+        <div
+          key={float.id}
+          className="absolute -top-4 left-1/2 -translate-x-1/2 animate-floatUp z-20 pointer-events-none"
+          onAnimationEnd={() => onFloatComplete(float.id)}
+        >
+          <span className={`font-bold ${float.emotional ? 'text-gold' : 'text-tea'} text-sm whitespace-nowrap`}>
+            ❤️耐心 +{float.value}
+            {float.emotional && <span className="text-gold text-xs ml-1">✨</span>}
+          </span>
+        </div>
+      ))}
+
       <div className="text-2xl">{customer.emoji}</div>
       <div className="text-xs font-song truncate">{customer.name}</div>
       <div className={`text-[10px] font-song ${seat?.tier === '贵宾' ? 'text-gold' : seat?.tier === '雅座' ? 'text-tea' : 'text-sandal'}`}>
         {seat?.tier}座
       </div>
       <div className="text-xl my-1">{getMood(customer.satisfaction)}</div>
-      <div className="h-1.5 bg-paper-dark rounded-full overflow-hidden mb-1.5">
+      <div className="h-1.5 bg-paper-dark rounded-full overflow-hidden mb-1">
         <div
           className="h-full transition-all"
           style={{
@@ -81,6 +109,11 @@ function CustomerCard({ customer, seat, teaState, onRefill, canAfford, performan
             backgroundColor: customer.satisfaction > 60 ? '#6B8E5A' : customer.satisfaction > 40 ? '#C9A24B' : '#A83232',
           }}
         />
+      </div>
+
+      <div className="flex items-center justify-center gap-1 mb-1" title={`耐心值：${patience}/10`}>
+        <Heart className="w-3 h-3 text-cinnabar" fill="#D13B1F" />
+        <span className="text-[10px] font-semibold text-cinnabar">耐心 {patience}</span>
       </div>
 
       <div className="flex items-center justify-center gap-1 mb-1" title={`茶温：${teaLevel}（${Math.round(temperature)}°）`}>
@@ -93,7 +126,7 @@ function CustomerCard({ customer, seat, teaState, onRefill, canAfford, performan
         {urgent && <AlertTriangle className="w-3 h-3 text-cinnabar" />}
       </div>
 
-      <div className="h-1 bg-paper-dark rounded-full overflow-hidden mb-1.5">
+      <div className="h-1 bg-paper-dark rounded-full overflow-hidden mb-1">
         <div
           className="h-full transition-all duration-300"
           style={{ width: `${temperature}%`, backgroundColor: teaColor }}
@@ -108,11 +141,66 @@ function CustomerCard({ customer, seat, teaState, onRefill, canAfford, performan
             ? 'bg-tea/20 border-tea text-tea hover:bg-tea/30 active:scale-95'
             : 'bg-paper-dark/50 border-sandal/30 text-ink-light cursor-not-allowed'
         } ${urgent ? 'animate-pulse' : ''}`}
-        title={`续茶（3文），已续${refillCount}次`}
+        title={`续茶（3文），已续${refillCount}次。上次续茶耐心+${lastPatienceGain}${lastRefillEmotional ? '（情绪契合）' : ''}`}
       >
         <Coffee className="w-3 h-3" />
         <span>续茶</span>
+        <Clock className="w-2.5 h-2.5 ml-0.5 opacity-60" />
       </button>
+    </div>
+  )
+}
+
+interface LeaveAlertModalProps {
+  alert: CustomerLeaveAlert
+  onDismiss: () => void
+}
+
+function LeaveAlertModal({ alert, onDismiss }: LeaveAlertModalProps) {
+  const tierColor = alert.seatTier === '贵宾' ? 'text-gold' : alert.seatTier === '雅座' ? 'text-tea' : 'text-sandal'
+  const tierBg = alert.seatTier === '贵宾' ? 'bg-gold/15 border-gold/40' : alert.seatTier === '雅座' ? 'bg-tea/15 border-tea/40' : 'bg-sandal/15 border-sandal/40'
+
+  return (
+    <div className="fixed inset-0 bg-ink/60 z-50 flex items-center justify-center p-4 animate-fadeIn">
+      <div className={`card-ancient max-w-md w-full animate-unroll p-6 border-4 ${tierBg}`}>
+        <div className="text-center mb-4">
+          <div className="text-6xl mb-3">🚪💨</div>
+          <h3 className="font-brush text-2xl text-cinnabar mb-2">客官愤然离席！</h3>
+        </div>
+
+        <div className="space-y-3 mb-6">
+          <div className="flex items-center justify-between p-3 bg-paper-dark/50 rounded-lg">
+            <span className="font-song text-ink-light">客人</span>
+            <span className={`font-bold ${tierColor}`}>
+              {alert.customerName}（{alert.customerType}）
+            </span>
+          </div>
+          <div className="flex items-center justify-between p-3 bg-paper-dark/50 rounded-lg">
+            <span className="font-song text-ink-light">座位</span>
+            <span className={`font-bold ${tierColor}`}>{alert.seatTier}座</span>
+          </div>
+          <div className="flex items-center justify-between p-3 bg-cinnabar/10 rounded-lg border border-cinnabar/30">
+            <span className="font-song text-ink-light">原因</span>
+            <span className="font-bold text-cinnabar">{alert.reason}</span>
+          </div>
+        </div>
+
+        <div className="p-3 bg-sandal/10 rounded-lg border border-sandal/30 mb-6 text-sm text-ink-light">
+          <p className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-sandal flex-shrink-0 mt-0.5" />
+            <span>
+              茶水冰冷导致贵客流失！该座位收入将受到损失，并且影响茶楼声望。请务必注意及时为高等级座位续茶！
+            </span>
+          </p>
+        </div>
+
+        <button
+          onClick={onDismiss}
+          className="w-full btn-cinnabar py-3 font-song text-lg"
+        >
+          知道了，我这就去招呼其他客人
+        </button>
+      </div>
     </div>
   )
 }
@@ -132,7 +220,12 @@ export default function Performance() {
     seats,
     gold,
     performanceTick,
+    customerLeaveAlerts,
+    dismissLeaveAlert,
   } = useGameStore()
+
+  const [patienceFloats, setPatienceFloats] = useState<PatienceFloat[]>([])
+  const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (!performanceActive) return
@@ -151,11 +244,42 @@ export default function Performance() {
     return Math.round(seatTeaStates.reduce((s, t) => s + t.temperature, 0) / seatTeaStates.length)
   }, [seatTeaStates])
 
+  const avgPatience = useMemo(() => {
+    if (seated.length === 0) return 0
+    return Math.round(seated.reduce((s, c) => s + c.patience, 0) / seated.length * 10) / 10
+  }, [seated])
+
   const turningInfo = isNearTurningPoint(storyProgress)
   const coldCount = seatTeaStates.filter((t) => getTeaLevel(t.temperature) === '冷').length
   const coolCount = seatTeaStates.filter((t) => getTeaLevel(t.temperature) === '凉').length
   const emotionalCount = seatTeaStates.filter((t) => t.emotionalMatch).length
   const canAffordRefill = gold >= 3
+
+  const handleRefill = (seatId: number) => {
+    const teaState = seatTeaStates.find((ts) => ts.seatId === seatId)
+    if (!teaState) return
+    const emotionalMatch = teaState.emotionalMatch || isNearTurningPoint(storyProgress).near
+    const patienceGain = emotionalMatch ? 8 : 3
+    const float: PatienceFloat = {
+      id: `float-${Date.now()}-${Math.random()}`,
+      seatId,
+      value: patienceGain,
+      emotional: emotionalMatch,
+    }
+    setPatienceFloats((prev) => [...prev, float])
+    refillTea(seatId)
+  }
+
+  const handleFloatComplete = (floatId: string) => {
+    setPatienceFloats((prev) => prev.filter((f) => f.id !== floatId))
+  }
+
+  const handleDismissAlert = (alertId: string) => {
+    setDismissedAlerts((prev) => new Set(prev).add(alertId))
+    dismissLeaveAlert(alertId)
+  }
+
+  const activeAlert = customerLeaveAlerts.find((a) => !dismissedAlerts.has(a.id))
 
   if (!performanceActive && storyProgress === 0) {
     return (
@@ -166,7 +290,7 @@ export default function Performance() {
         <div className="mt-6 text-sm text-ink-light">
           <div className="flex items-center justify-center gap-2">
             <Coffee className="w-4 h-4 text-tea" />
-            <span>夜场提示：注意管理每桌茶温，在故事转折点前后续茶可获得额外满意度加成</span>
+            <span>夜场提示：注意管理每桌茶温，在故事转折点前后续茶可获得耐心与满意度双重加成</span>
           </div>
         </div>
       </div>
@@ -180,6 +304,7 @@ export default function Performance() {
       </h2>
 
       {currentInterruption && <Interruption event={currentInterruption} onChoose={handleInterruption} />}
+      {activeAlert && <LeaveAlertModal alert={activeAlert} onDismiss={() => handleDismissAlert(activeAlert.id)} />}
 
       <div className="relative">
         <div className="text-center py-6 bg-gradient-to-b from-cinnabar/10 to-paper rounded-xl border-2 border-cinnabar/30 mb-6">
@@ -263,7 +388,8 @@ export default function Performance() {
             <div>
               <div className="font-brush text-lg text-gold">即将进入「{turningInfo.range}」！</div>
               <div className="text-xs text-ink-light">
-                此时为客人们续上「热」或「温」的茶水，可触发<span className="text-tea font-semibold">情绪契合</span>效果，大幅提升满意度！
+                此时为客人们续上「热」或「温」的茶水，可触发<span className="text-tea font-semibold">情绪契合</span>效果，
+                <span className="text-cinnabar font-semibold">耐心+8</span> + 满意度+17双重加成！
               </div>
             </div>
           </div>
@@ -299,6 +425,11 @@ export default function Performance() {
                 {avgSat}
               </span>
             </div>
+            <div className="flex items-center gap-1 text-ink-light">
+              <Heart className="w-4 h-4 text-cinnabar" fill="#D13B1F" />
+              <span>平均耐心</span>
+              <span className="font-bold text-lg text-cinnabar">{avgPatience}</span>
+            </div>
             {emotionalCount > 0 && (
               <div className="flex items-center gap-1 text-gold">
                 <Sparkles className="w-4 h-4" />
@@ -329,18 +460,20 @@ export default function Performance() {
                 customer={c}
                 seat={seat}
                 teaState={tea}
-                onRefill={refillTea}
+                onRefill={handleRefill}
                 canAfford={canAffordRefill}
                 performanceActive={performanceActive}
+                onFloatComplete={handleFloatComplete}
+                floats={patienceFloats}
               />
             )
           })}
         </div>
 
         {performanceActive && (
-          <div className="mt-4 text-center text-xs text-ink-light">
-            <p>💡 点击「续茶」可将对应桌茶水重置为滚烫。续茶时机越贴近故事转折点，客人满意度越高。</p>
-            <p>💡 座位越尊贵，茶水降温速度越慢，但茶凉造成的损失也越大。</p>
+          <div className="mt-4 text-center text-xs text-ink-light space-y-1">
+            <p>💡 点击「续茶」可将对应桌茶水重置为滚烫。续茶时机越贴近故事转折点，耐心与满意度加成越大。</p>
+            <p>💡 座位越尊贵，茶水降温速度越慢，但茶凉造成的损失也越大。❤️耐心值越高，客人越不容易催促或离席。</p>
           </div>
         )}
       </div>

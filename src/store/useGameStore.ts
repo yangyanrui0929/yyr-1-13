@@ -15,6 +15,7 @@ import type {
   ReputationHistory,
   Renovation,
   SeatTeaState,
+  CustomerLeaveAlert,
 } from '@/types'
 import { STORIES } from '@/data/stories'
 import { initSnacks } from '@/data/snacks'
@@ -69,6 +70,8 @@ function initSeatTeaStates(seats: Seat[]): SeatTeaState[] {
     emotionalMatch: false,
     promptedUrge: false,
     promptedLeave: false,
+    lastPatienceGain: 0,
+    lastRefillEmotional: false,
   }))
 }
 
@@ -112,6 +115,7 @@ const initialState: GameState = {
   lastSettlement: null,
   seatTeaStates: [],
   performanceTick: 0,
+  customerLeaveAlerts: [],
 }
 
 interface GameActions {
@@ -128,6 +132,7 @@ interface GameActions {
   resetGame: () => void
   addLedgerRecord: (type: LedgerRecord['type'], category: string, amount: number, note: string) => void
   refillTea: (seatId: number) => void
+  dismissLeaveAlert: (alertId: string) => void
 }
 
 export const useGameStore = create<GameState & GameActions>()(
@@ -228,6 +233,7 @@ export const useGameStore = create<GameState & GameActions>()(
           currentInterruption: null,
           seatTeaStates: initSeatTeaStates(seats),
           performanceTick: 0,
+          customerLeaveAlerts: [],
         })
       },
 
@@ -250,8 +256,16 @@ export const useGameStore = create<GameState & GameActions>()(
           emotionalMatch: false,
           promptedUrge: false,
           promptedLeave: false,
+          lastPatienceGain: 0,
+          lastRefillEmotional: false,
         }))
-        set({ performanceActive: true, storyProgress: 0, performanceTick: 0, seatTeaStates: refreshedTeaStates })
+        set({
+          performanceActive: true,
+          storyProgress: 0,
+          performanceTick: 0,
+          seatTeaStates: refreshedTeaStates,
+          customerLeaveAlerts: [],
+        })
       },
 
       tickPerformance: () => {
@@ -309,6 +323,17 @@ export const useGameStore = create<GameState & GameActions>()(
                   x.seatId === ts.seatId ? { ...x, promptedLeave: true } : x
                 )
                 customersToRemove.push(customer.id)
+                const alert: CustomerLeaveAlert = {
+                  id: uid(),
+                  customerName: customer.name,
+                  customerType: customer.type,
+                  seatTier: seat.tier,
+                  reason: '茶水冰冷，不堪忍受',
+                  timestamp: Date.now(),
+                }
+                set((s) => ({
+                  customerLeaveAlerts: [...s.customerLeaveAlerts, alert],
+                }))
               }
             }
             if (seat?.tier === '贵宾' && !ts.promptedLeave) {
@@ -317,6 +342,17 @@ export const useGameStore = create<GameState & GameActions>()(
                   x.seatId === ts.seatId ? { ...x, promptedLeave: true } : x
                 )
                 customersToRemove.push(customer.id)
+                const alert: CustomerLeaveAlert = {
+                  id: uid(),
+                  customerName: customer.name,
+                  customerType: customer.type,
+                  seatTier: seat.tier,
+                  reason: '茶凉待客失礼，有损贵客颜面',
+                  timestamp: Date.now(),
+                }
+                set((s) => ({
+                  customerLeaveAlerts: [...s.customerLeaveAlerts, alert],
+                }))
               }
             }
           }
@@ -401,6 +437,13 @@ export const useGameStore = create<GameState & GameActions>()(
 
         const emotionalMatch = calcEmotionalMatch(90, state.storyProgress) || teaState.emotionalMatch
 
+        let patienceGain = 3
+        let satisfactionGain = 5
+        if (emotionalMatch) {
+          patienceGain += 5
+          satisfactionGain += 12
+        }
+
         const updatedTeaStates = state.seatTeaStates.map((ts) =>
           ts.seatId === seatId
             ? {
@@ -410,16 +453,19 @@ export const useGameStore = create<GameState & GameActions>()(
                 refillCount: ts.refillCount + 1,
                 emotionalMatch,
                 promptedUrge: false,
+                lastPatienceGain: patienceGain,
+                lastRefillEmotional: emotionalMatch,
               }
             : ts
         )
 
-        let bonusSatisfaction = 5
-        if (emotionalMatch) bonusSatisfaction += 12
-
         const customers = state.customers.map((c) =>
           c.seatId === seatId
-            ? { ...c, satisfaction: Math.max(0, Math.min(100, c.satisfaction + bonusSatisfaction)) }
+            ? {
+                ...c,
+                satisfaction: Math.max(0, Math.min(100, c.satisfaction + satisfactionGain)),
+                patience: Math.max(0, Math.min(10, c.patience + patienceGain)),
+              }
             : c
         )
 
@@ -429,7 +475,13 @@ export const useGameStore = create<GameState & GameActions>()(
           customers,
         })
 
-        get().addLedgerRecord('支出', '续茶服务', refillCost, `为第${seatId}号桌续茶${emotionalMatch ? '（情绪契合）' : ''}`)
+        get().addLedgerRecord('支出', '续茶服务', refillCost, `为第${seatId}号桌续茶${emotionalMatch ? '（情绪契合，耐心+' + patienceGain + '）' : '（耐心+' + patienceGain + '）'}`)
+      },
+
+      dismissLeaveAlert: (alertId: string) => {
+        set((s) => ({
+          customerLeaveAlerts: s.customerLeaveAlerts.filter((a) => a.id !== alertId),
+        }))
       },
 
       handleInterruption: (option: InterruptionOption) => {
@@ -570,6 +622,7 @@ export const useGameStore = create<GameState & GameActions>()(
           seats: s.seats.map((seat) => ({ ...seat, occupied: false })),
           seatTeaStates: [],
           performanceTick: 0,
+          customerLeaveAlerts: [],
         }))
       },
 
@@ -598,16 +651,29 @@ export const useGameStore = create<GameState & GameActions>()(
       name: 'teahouse-storyteller-save',
       partialize: (s) => ({
         day: s.day,
+        phase: s.phase,
         gold: s.gold,
         reputation: s.reputation,
+        weather: s.weather,
         snacks: s.snacks,
         seats: s.seats,
         renovations: s.renovations,
+        customers: s.customers,
+        currentStory: s.currentStory,
+        currentBranch: s.currentBranch,
+        storyProgress: s.storyProgress,
+        availableStories: s.availableStories,
+        performanceActive: s.performanceActive,
+        seatTeaStates: s.seatTeaStates,
+        performanceTick: s.performanceTick,
+        customerLeaveAlerts: s.customerLeaveAlerts,
         ledger: s.ledger,
         storyHistory: s.storyHistory,
         reputationHistory: s.reputationHistory,
         lastStoryDay: s.lastStoryDay,
         storyScores: s.storyScores,
+        isSettlement: s.isSettlement,
+        lastSettlement: s.lastSettlement,
       }),
     }
   )
